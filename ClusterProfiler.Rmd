@@ -1,0 +1,189 @@
+---
+title: "ClusterProfiler"
+author: "Sam McMillan"
+date: "2024-08-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(clusterProfiler)
+```
+
+```{r}
+alldata<-readRDS("Dataframes/alldata.rds")
+alldata_long<-readRDS("Dataframes/alldata_long.rds")
+samplekey<-readRDS("Dataframes/samplekey.rds")
+probeinfo<-readRDS("Dataframes/probeinfo.rds")
+DEall<-readRDS("Dataframes/DEall.rds")
+DEgenelist_all<-readRDS("Dataframes/DEgenelist_all.rds")
+```
+
+```{r}
+#Install mouse database for GSE
+organism = "org.Mm.eg.db"
+library(organism, character.only = TRUE)
+
+ncbi_cefcdice<-DEall%>%
+  filter(sampletype=="cecum",comparison=="cef_v_CDI",BH.p.value<=0.05)%>%
+  left_join(.,probeinfo,by=c("X"="Probe Name"))%>%
+  arrange(-Log2.fold.change)%>%
+  pull(Log2.fold.change,entrezgene_id)
+
+
+set.seed(13093)
+gse_kegg_cec<-gseKEGG(geneList = ncbi_cefcdice,
+           organism="mmu",
+           keyType="ncbi-geneid",
+           minGSSize = 3,
+           maxGSSize = 800,
+           pvalueCutoff = 0.05,
+           pAdjustMethod="BH",
+           by="fgsea")
+
+gse_kegg_cec@result$Description<-str_remove(gse_kegg_cec@result$Description," - Mus musculus \\(house mouse\\)")
+
+gse_kegg_plot<-gse_kegg_cec@result%>%
+            group_by(core_enrichment,NES,p.adjust,enrichmentScore,setSize)%>%
+            summarize_all(toString)%>%
+            ungroup()%>%
+            mutate(direction=ifelse(NES>0,"Up in CDI","Down in CDI"))%>%
+            group_by(direction)%>%
+            arrange(-abs(NES))%>%
+            mutate(count=1:n())%>%
+            arrange(NES)%>%
+            mutate(plotname=fct_inorder(str_wrap(Description,60)))
+
+ggplot(gse_kegg_plot%>%filter(count<=5),aes(x=NES,y=plotname,color=p.adjust,size=setSize))+
+  geom_point()+
+  theme_bw()+
+  labs(y="",x="Normalized Enrichment Score",size="# of Genes in Set","Adjusted p-value")+
+  scale_x_continuous(limits=c(-3,3),breaks=seq(-3,3,1))
+
+ggsave("Graphs/Supp_Cecum_KEGG_GSE.pdf",height=5,width=6)
+
+saveRDS(gse_kegg_cec,"Dataframes/gse_kegg_cec.rds")
+
+```
+
+# Go terms
+```{r}
+cefcdice<-DEall%>%
+  filter(sampletype=="cecum",comparison=="cef_v_CDI",BH.p.value<=0.05)%>%
+  left_join(.,probeinfo,by=c("X"="Probe Name"))%>%
+  arrange(-Log2.fold.change)%>%
+  pull(Log2.fold.change,ensembl_gene_id)
+
+gse_go_cec<-gseGO(geneList = cefcdice,
+           ont="ALL",
+           keyType="ENSEMBL",
+           minGSSize = 3,
+           maxGSSize = 800,
+           pvalueCutoff = 0.05,
+           verbose=T,
+           OrgDb = organism,
+           pAdjustMethod="none")
+
+gse_go_plot<-gse_go_cec@result%>%
+            group_by(core_enrichment,NES,p.adjust,enrichmentScore,setSize)%>%
+            summarize_all(toString)%>%
+            ungroup()%>%
+            mutate(direction=ifelse(NES>0,"Up in CDI","Down in CDI"))%>%
+            group_by(direction)%>%
+            arrange(-abs(NES))%>%
+            mutate(count=1:n())%>%
+            arrange(NES)%>%
+            mutate(plotname=fct_inorder(str_wrap(Description,60)))
+
+ggplot(gse_go_plot%>%filter(count<=15),aes(x=NES,y=plotname,color=p.adjust,size=setSize))+
+  geom_point()+
+  theme_bw()
+
+ggsave("Graphs/GO_GSE_cefvcdi_cecum.pdf",height=11,width=8.5)
+
+
+
+saveRDS(gse_go_cec,"Dataframes/gse_go_cec.rds")
+
+
+```
+
+#conventional
+```{r}
+cefcdice_conv<-DEall%>%
+  filter(sampletype=="cecum",comparison=="conv_v_cef",BH.p.value<=0.05)%>%
+  left_join(.,probeinfo,by=c("X"="Probe Name"))%>%
+  arrange(-Log2.fold.change)%>%
+  pull(Log2.fold.change,ensembl_gene_id)
+
+#Install mouse database for GSE
+organism = "org.Mm.eg.db"
+library(organism, character.only = TRUE)
+
+gse_go_cec_conv<-gseGO(geneList = cefcdice_conv,
+           ont="ALL",
+           keyType="ENSEMBL",
+           minGSSize = 3,
+           maxGSSize = 800,
+           pvalueCutoff = 0.05,
+           verbose=T,
+           OrgDb = organism,
+           pAdjustMethod="none")
+
+gse_go_plot_conv<-gse_go_cec_conv@result%>%
+            group_by(core_enrichment,NES,p.adjust,enrichmentScore,setSize)%>%
+            summarize_all(toString)%>%
+            ungroup()%>%
+            mutate(direction=ifelse(NES>0,"Up in CDI","Down in CDI"))%>%
+            group_by(direction)%>%
+            arrange(-abs(NES))%>%
+            mutate(count=1:n())%>%
+            arrange(NES)%>%
+            mutate(plotname=fct_inorder(str_wrap(Description,60)))
+
+ggplot(gse_go_plot_conv%>%filter(count<=15),aes(x=NES,y=plotname,color=p.adjust,size=setSize))+
+  geom_point()+
+  theme_bw()
+
+ggsave("Graphs/GO_GSE_convcef_cecum.pdf",height=11,width=8.5)
+
+ncbi_cefcdice_conv<-DEall%>%
+  filter(sampletype=="cecum",comparison=="conv_v_cef",BH.p.value<=0.05)%>%
+  left_join(.,probeinfo,by=c("X"="Probe Name"))%>%
+  arrange(-Log2.fold.change)%>%
+  pull(Log2.fold.change,entrezgene_id)
+
+
+gse_kegg_cec_conv<-gseKEGG(geneList = ncbi_cefcdice_conv,
+           organism="mmu",
+           keyType="ncbi-geneid",
+           minGSSize = 3,
+           maxGSSize = 800,
+           pvalueCutoff = 0.05,
+           pAdjustMethod="none")
+
+gse_kegg_cec_conv@result$Description<-str_remove(gse_kegg_cec_conv@result$Description," - Mus musculus \\(house mouse\\)")
+
+gse_kegg_plot_conv<-gse_kegg_cec_conv@result%>%
+            group_by(core_enrichment,NES,p.adjust,enrichmentScore,setSize)%>%
+            summarize_all(toString)%>%
+            ungroup()%>%
+            mutate(direction=ifelse(NES>0,"Up in CDI","Down in CDI"))%>%
+            group_by(direction)%>%
+            arrange(-abs(NES))%>%
+            mutate(count=1:n())%>%
+            arrange(NES)%>%
+            mutate(plotname=fct_inorder(str_wrap(Description,60)))
+
+ggplot(gse_kegg_plot_conv%>%filter(count<=15),aes(x=NES,y=plotname,color=p.adjust,size=setSize))+
+  geom_point()+
+  theme_bw()
+
+ggsave("Graphs/KEGG_GSE_convcef_cecum.pdf",height=11,width=8.5)
+
+saveRDS(gse_go_cec_conv,"Dataframes/gse_go_cec_conv.rds")
+saveRDS(gse_kegg_cec_conv,"Dataframes/gse_kegg_cec_conv.rds")
+
+```
+
+

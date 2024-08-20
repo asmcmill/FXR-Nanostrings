@@ -1,0 +1,132 @@
+---
+title: "Data Processing"
+author: "Sam McMillan"
+date: "2024-07-29"
+output: html_document
+---
+
+Study background: Nanostrings with a gut inflammation panel as well as a custom bile acid and nuclear receptor panel was performed on 12 mice. Each mouse had liver, cecum, and ileal tissue samples. 
+
+Mice are split into 3 groups: 
+conventional (no intervention control) 
+cefoperazone (antibiotic only control)
+cdi (cefoperazone treated mice challenged with C. difficile)
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggrepel)
+library(biomaRt)
+
+```
+These files have been run through the Nanostrings software nSolver. They were blank subtracted based on negative probes and normalized based on housekeeping genes and positive controls. DE analysis was performed such that cefoperazone group is reference so it compares to conventional and cdi.
+```{r}
+alldata<-read.csv("T:\\Raw Data\\20220603_FXR Nanostrings\\nSolver/Normalized AllData Export.csv",check.names=F)
+rawprobe<-read.csv("T:\\Raw Data\\20220603_FXR Nanostrings\\nSolver/ProbeAnnotations_NS_Mm_Fibrosis_V2.0+PLS_NCSU_Pike_C9912.csv",skip=1)
+
+samplekey<-as.data.frame(colnames(alldata[20:55]))%>%
+  dplyr::rename("filename"=1)%>%
+  mutate(split=str_remove(filename,regex("2022060.\\_CPike.\\_")))%>%
+  separate(split,c("sampletype","cage","mouse"),sep="[-_]",extra="drop")%>%
+  mutate(treatment=case_when(cage==342~"conv",
+                             cage==343~"cef",
+                             cage==344~"cdi"))
+
+alldata_long<-alldata[c(1,20:55)]%>%
+            pivot_longer(-`Probe Name`,names_to="filename",values_to="normcount")%>%
+            left_join(.,samplekey, by="filename")%>%
+            mutate(treatment=factor(treatment, levels=c("conv","cef","cdi")))
+#cecum DE
+ccdi<-read.csv("t:/Raw data/20220603_FXR Nanostrings/nSolver/DE Output/Cecum BH 2024-07-29 14-51/results/DE/DE results - treatmentcdi.csv")%>%mutate(sampletype="cecum")
+cconv<-read.csv("t:/Raw data/20220603_FXR Nanostrings/nSolver/DE Output/Cecum BH 2024-07-29 14-51/results/DE/DE results - treatmentconv.csv")%>%mutate(sampletype="cecum")
+
+#ileum DE
+icdi<-read.csv("T:/Raw Data/20220603_FXR Nanostrings/nSolver/DE Output/ileum BH 2024-07-29 14-49/results/DE/DE results - treatmentcdi.csv")%>%mutate(sampletype="ileum")
+iconv<-read.csv("T:/Raw Data/20220603_FXR Nanostrings/nSolver/DE Output/ileum BH 2024-07-29 14-49/results/DE/DE results - treatmentconv.csv")%>%mutate(sampletype="ileum")
+
+#liver DE
+lcdi<-read.csv("T:/Raw Data/20220603_FXR Nanostrings/nSolver/DE Output/Liver BH 2024-07-29 14-47/results/DE/DE results - treatmentcdi.csv")%>%mutate(sampletype="liver")
+lconv<-read.csv("T:/Raw Data/20220603_FXR Nanostrings/nSolver/DE Output/Liver BH 2024-07-29 14-47/results/DE/DE results - treatmentconv.csv")%>%mutate(sampletype="liver")
+
+DEcdi<-do.call(rbind, list(ccdi,icdi,lcdi))%>%mutate(comparison="cef_v_CDI")%>%mutate(X=str_remove(X,"-mRNA"))
+DEconv<-do.call(rbind, list(cconv,iconv,lconv))%>%mutate(comparison="conv_v_cef")%>%mutate(X=str_remove(X,"-mRNA"))%>%
+  mutate(Log2.fold.change=-Log2.fold.change)
+DEall<-rbind(DEcdi,DEconv)
+
+saveRDS(alldata,"./Dataframes/alldata.rds")
+saveRDS(alldata_long,"./Dataframes/alldata_long.rds")
+saveRDS(DEall,"./Dataframes/DEall.rds")
+saveRDS(samplekey,"./Dataframes/samplekey.rds")
+
+
+```
+
+
+Lets make a probe annotation list
+```{r}
+ensembl<-useEnsembl(biomart="genes",dataset="mmusculus_gene_ensembl")
+
+probeinfo<-alldata%>%
+  dplyr::select('Probe Name','Accession #','NS Probe ID' ,'Target Sequence')%>%
+  left_join(.,rawprobe,by=c("NS Probe ID"="ProbeID"))%>%
+  dplyr::select('Probe Name','Accession #','NS Probe ID' ,'Target Sequence',Probe.Annotation,KEGG.Pathways)%>%
+  filter(!grepl("NEG_",'Probe Name'),!grepl("POS_",'Probe Name'))
+
+GOterms<-getBM(attributes=c('go_id',"name_1006","uniprot_gn_symbol","ensembl_gene_id","entrezgene_id"),
+            filters="uniprot_gn_symbol",
+            values=probeinfo$'Probe Name',
+            mart=ensembl)
+
+missing<-probeinfo$'Probe Name'[!toupper(probeinfo$'Probe Name') %in% toupper(GOterms$uniprot_gn_symbol)]
+
+##I manually annotated missing genes with mouse ensembl IDs
+manual_ensmbl<-read.csv("missing.csv")
+
+GOterms_manual<-getBM(attributes=c('go_id',"name_1006","ensembl_gene_id","entrezgene_id"),
+            filters="ensembl_gene_id",
+            values=manual_ensmbl$Ensembl,
+            mart=ensembl)
+
+GOsum<-GOterms%>%
+  dplyr::rename("ID"="uniprot_gn_symbol")%>%
+  rbind(.,GOterms_manual%>%
+          left_join(.,manual_ensmbl,by=c("ensembl_gene_id"="Ensembl"))%>%
+          dplyr::rename("ID"=missing))%>%
+  filter(go_id!="")%>%
+  group_by(ID)%>%
+  mutate(GO=paste0(go_id,collapse=";"),GOdesc=paste0(name_1006,collapse=";"),.keep="unused")%>%
+  unique()
+
+
+
+#IDK why these are missing, I'm just going to manually input from ensemble or ncbi website
+probeinfo<-left_join(probeinfo%>%mutate(merge=toupper(`Probe Name`)),GOsum%>%mutate(merge=toupper(ID)),by="merge")%>%
+  mutate(ensembl_gene_id=case_when(`Probe Name`=="Col6a5"~"ENSMUSG00000091345",
+                                   `Probe Name`=="Cxcl11"~"ENSMUSG00000060183",
+                                   `Probe Name`=="H2-Pa"~"ENSMUSG00000098241",
+                                   `Probe Name`=="Oas1b"~"ENSMUSG00000029605",
+                                   .default=ensembl_gene_id))%>%
+  mutate(entrezgene_id=case_when(`Probe Name`=="Col6a5"~665033,
+                                   `Probe Name`=="Cxcl11"~56066,
+                                   `Probe Name`=="H2-Pa"~150031,
+                                   `Probe Name`=="Oas1b"~23961,
+                                    `Probe Name`=="Cycs"~13063,
+                                   `Probe Name`=="Uba52"~22186,
+                                   `Probe Name`=="Ctnnd1"~12388,
+                                   `Probe Name`=="Ddit3"~13198,
+                                   .default=entrezgene_id))%>%
+  #I also have some genes duplicated, I'll pick one
+  filter(!entrezgene_id %in% c(105886299,12314,12315,624367,69050
+,381059) & !ensembl_gene_id %in% c("ENSMUSG00000101645","ENSMUSG00000058927","ENSMUSG00000116429","ENSMUSG00000068240"))
+
+
+check<-filter(probeinfo, `Probe Name` %in% filter(probeinfo, duplicated(probeinfo$`Probe Name`))$`Probe Name`)
+
+saveRDS(probeinfo,"Dataframes/probeinfo.rds")
+
+```
+
+
+
+
+
+

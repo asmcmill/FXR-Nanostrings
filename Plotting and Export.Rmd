@@ -1,0 +1,354 @@
+---
+title: "Plotting"
+author: "Sam McMillan"
+date: "2024-08-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggrepel)
+library(ComplexHeatmap)
+library(randomForest)
+library(janitor)
+library(rstatix)
+library(ggpubr)
+library(patchwork)
+library(tidyHeatmap)
+library(writexl)
+```
+
+
+```{r}
+alldata<-readRDS("Dataframes/alldata.rds")
+alldata_long<-readRDS("Dataframes/alldata_long.rds")
+samplekey<-readRDS("Dataframes/samplekey.rds")
+probeinfo<-readRDS("Dataframes/probeinfo.rds")
+DEall<-readRDS("Dataframes/DEall.rds")
+DEgenelist_all<-readRDS("Dataframes/DEgenelist_all.rds")
+gse_kegg_cec<-readRDS("Dataframes/gse_kegg_cec.rds")
+
+```
+
+```{r}
+anno_colors=list(
+  `KEGG Pathway`=c("IL-17 signaling"="chocolate4",
+                   "Glycolysis / Gluconeogenesis"="cyan3",
+                   "PPAR signaling pathway"="magenta3",
+                   "Cholesterol metabolism"="gold"
+                   ),
+  Treatment=c("conv"="white",
+              "cef"="olivedrab1",
+              "cdi"="springgreen3"
+              ))
+```
+
+
+#Based on the KEGG GSEA we see some KEGG pathways that are downregulated in CDI.
+mmu04657: IL-17 Signalling
+mmu04064: NFkB
+mmu00010: Glycolysis / Gluconeogenesis
+mmu04979: Cholesterol metabolism
+mmu03320: PPAR signaling pathway
+
+```{r}
+kegg<-gse_kegg_cec@geneSets[c("mmu04657","mmu00010","mmu04979","mmu03320")]
+
+cclist<-c("Scd1","Cpt1a","Apoc3","Cyp27a1","Apoa4","Nr1h4","Fgf15","NR0B2","Fabp6","SLC10A2","Pparg","NR1I3","NR1I1")
+
+DE_cec<-DEall%>%
+  filter(sampletype=="cecum",comparison=="cef_v_CDI")%>%
+  mutate(plot.p=-log10(BH.p.value))%>%
+  mutate(direction=case_when(Log2.fold.change>0.5 & BH.p.value<=0.05~"Up",
+                             Log2.fold.change < -0.5 & BH.p.value<=0.05~"Down",
+                             .default="Not DE"))%>%
+  left_join(.,probeinfo,by=c("X"="Probe Name"))%>%
+  mutate(a=ifelse(entrezgene_id %in% kegg$mmu04657,"IL-17 signaling",NA))%>%
+  mutate(b=ifelse(entrezgene_id %in% kegg$mmu00010,"Glycolysis / Gluconeogenesis",NA))%>%
+  mutate(c=ifelse(entrezgene_id %in% kegg$mmu04979,"Cholesterol metabolism",NA))%>%
+  mutate(d=ifelse(entrezgene_id %in% kegg$mmu03320,"PPAR signaling pathway",NA))%>%
+  mutate(e=ifelse(entrezgene_id %in% unlist(kegg),"+",NA))%>%
+  mutate(f=ifelse(X %in% cclist,"Cell Culture Gene",NA))
+
+a<-ggplot()+ 
+  geom_point(data=DE_cec%>%filter(is.na(a)),aes(x=Log2.fold.change,y=plot.p,alpha=direction,fill=a),shape=21,size=3)+
+  geom_point(data=DE_cec%>%filter(!is.na(a) & direction!="Not DE"),aes(x=Log2.fold.change,y=plot.p,fill=a,alpha=direction),shape=21,size=3)+ 
+  geom_text_repel(data=DE_cec%>%filter(!is.na(a) & direction!="Not DE"),aes(x=Log2.fold.change, y=plot.p, label=X),max.overlaps=20,min.segment.length=0.2,force=3)+ 
+  geom_hline(yintercept=-log10(0.05),linetype="dashed",color="grey50")+
+  geom_vline(xintercept=.5, linetype="dashed",color="grey50")+ 
+  geom_vline(xintercept=-0.5, linetype="dashed",color="grey50")+
+  theme_bw()+ 
+  theme(panel.grid=element_blank(),
+        legend.position="bottom")+ 
+  labs(x="Log2Fold change",y="-log10padj",fill="Gene Set")+ 
+  scale_y_continuous(limits=c(0,4), breaks=seq(0,4,1), expand=c(0,0))+ 
+  scale_x_continuous(limits=c(-9,9))+ 
+  scale_alpha_manual(values=c(1,0.1,1),guide="none")+
+    scale_fill_manual(values=c(anno_colors$`KEGG Pathway`["IL-17 signaling"]),na.value="grey",guide="none")+
+  ggtitle("IL-17 Signalling")#
+
+b<-ggplot()+ 
+  geom_point(data=DE_cec%>%filter(is.na(b)),aes(x=Log2.fold.change,y=plot.p,alpha=direction,fill=b),shape=21,size=3)+
+  geom_point(data=DE_cec%>%filter(!is.na(b) & direction!="Not DE"),aes(x=Log2.fold.change,y=plot.p,fill=b,alpha=direction),shape=21,size=3)+ 
+  geom_text_repel(data=DE_cec%>%filter(!is.na(b) & direction!="Not DE"),aes(x=Log2.fold.change, y=plot.p, label=X),max.overlaps=20,min.segment.length=0.2,force=3)+ 
+  geom_hline(yintercept=-log10(0.05),linetype="dashed",color="grey50")+
+  geom_vline(xintercept=.5, linetype="dashed",color="grey50")+ 
+  geom_vline(xintercept=-0.5, linetype="dashed",color="grey50")+
+  theme_bw()+ 
+  theme(panel.grid=element_blank(),
+        legend.position="bottom")+ 
+  labs(x="Log2Fold change",y="-log10padj",fill="Gene Set")+ 
+  scale_y_continuous(limits=c(0,4), breaks=seq(0,4,1), expand=c(0,0))+ 
+  scale_x_continuous(limits=c(-9,9))+ 
+  scale_alpha_manual(values=c(1,0.1,1),guide="none")+
+    scale_fill_manual(values=c(anno_colors$`KEGG Pathway`["Glycolysis / Gluconeogenesis"]),na.value="grey",guide="none")+
+  ggtitle("Glycolysis / Gluconeogenesis")#
+
+c<-ggplot()+ 
+  geom_point(data=DE_cec%>%filter(is.na(c)),aes(x=Log2.fold.change,y=plot.p,alpha=direction,fill=c),shape=21,size=3)+
+  geom_point(data=DE_cec%>%filter(!is.na(c) & direction!="Not DE"),aes(x=Log2.fold.change,y=plot.p,fill=c,alpha=direction),shape=21,size=3)+ 
+  geom_text_repel(data=DE_cec%>%filter(!is.na(c) & direction!="Not DE"),aes(x=Log2.fold.change, y=plot.p, label=X),max.overlaps=20,min.segment.length=0.2,force=3)+ 
+  geom_hline(yintercept=-log10(0.05),linetype="dashed",color="grey50")+
+  geom_vline(xintercept=.5, linetype="dashed",color="grey50")+ 
+  geom_vline(xintercept=-0.5, linetype="dashed",color="grey50")+
+  theme_bw()+ 
+  theme(panel.grid=element_blank(),
+        legend.position="bottom")+ 
+  labs(x="Log2Fold change",y="-log10padj",fill="Gene Set")+ 
+  scale_y_continuous(limits=c(0,4), breaks=seq(0,4,1), expand=c(0,0))+ 
+  scale_x_continuous(limits=c(-9,9))+ 
+  scale_alpha_manual(values=c(1,0.1,1),guide="none")+
+    scale_fill_manual(values=c(anno_colors$`KEGG Pathway`["Cholesterol metabolism"]),na.value="grey",guide="none")+
+  ggtitle("Cholesterol metabolism")#
+
+d<-ggplot()+ 
+  geom_point(data=DE_cec%>%filter(is.na(d)),aes(x=Log2.fold.change,y=plot.p,alpha=direction,fill=d),shape=21,size=3)+
+  geom_point(data=DE_cec%>%filter(!is.na(d) & direction!="Not DE"),aes(x=Log2.fold.change,y=plot.p,fill=d,alpha=direction),shape=21,size=3)+ 
+  geom_text_repel(data=DE_cec%>%filter(!is.na(d) & direction!="Not DE"),aes(x=Log2.fold.change, y=plot.p, label=X),max.overlaps=20,min.segment.length=0.2,force=3)+ 
+  geom_hline(yintercept=-log10(0.05),linetype="dashed",color="grey50")+
+  geom_vline(xintercept=.5, linetype="dashed",color="grey50")+ 
+  geom_vline(xintercept=-0.5, linetype="dashed",color="grey50")+
+  theme_bw()+ 
+  theme(panel.grid=element_blank(),
+        legend.position="bottom")+ 
+  labs(x="Log2Fold change",y="-log10padj",fill="Gene Set")+ 
+  scale_y_continuous(limits=c(0,4), breaks=seq(0,4,1), expand=c(0,0))+ 
+  scale_x_continuous(limits=c(-9,9))+ 
+  scale_alpha_manual(values=c(1,0.1,1),guide="none")+
+    scale_fill_manual(values=c(anno_colors$`KEGG Pathway`["PPAR signaling pathway"]),na.value="grey",guide="none")+
+  ggtitle("PPAR signaling pathway")#
+
+DE_cec_all<-DE_cec%>%
+  select(X,Log2.fold.change,plot.p,direction,a,b,c,d)%>%
+  pivot_longer(cols=c(a,b,c,d))%>%
+  select(-name)%>%
+  unique()%>%
+  mutate(value=factor(value, levels=c("IL-17 signaling","Glycolysis / Gluconeogenesis","Cholesterol metabolism","PPAR signaling pathway")))%>%
+  arrange(value)%>%
+  mutate(label=ifelse(direction!="Not DE",X,""))
+
+ngenes<-DE_cec%>%
+  select(X,direction)%>%
+  group_by(direction)%>%
+  summarize(count=n())
+
+e<-ggplot()+ 
+  geom_hline(yintercept=-log10(0.05),linetype="dashed",color="grey50")+
+  geom_vline(xintercept=.5, linetype="dashed",color="grey50")+ 
+  geom_vline(xintercept=-0.5, linetype="dashed",color="grey50")+
+  geom_point(data=DE_cec_all%>%filter(is.na(value)),aes(x=Log2.fold.change,y=plot.p,alpha=direction,fill=value),shape=21,size=3)+
+  geom_point(data=DE_cec_all%>%filter(!is.na(value) & direction!= "Not DE"),aes(x=Log2.fold.change,y=plot.p,fill=value,alpha=direction),shape=21,size=3)+ 
+  geom_text_repel(data=DE_cec_all%>%filter(!is.na(value) & direction!= "Not DE")%>%select(Log2.fold.change,plot.p,label)%>%unique(),aes(x=Log2.fold.change, y=plot.p, label=label),max.overlaps=20,min.segment.length=0.2,force=10)+ 
+
+  geom_text(data=filter(ngenes,direction=="Up"),aes(label=count,x=Inf),x=8.5,y=3.8,color="grey50")+
+  geom_text(data=filter(ngenes,direction=="Down"),aes(label=count,x=-Inf),x=-8.5,y=3.8,color="grey50")+
+  theme_bw()+ 
+  theme(panel.grid=element_blank(),
+        legend.position="bottom")+ 
+  labs(x="Log2Fold change",y="-log10padj",fill="Gene Set")+ 
+  scale_y_continuous(limits=c(0,4), breaks=seq(0,4,1), expand=c(0,0))+ 
+  scale_x_continuous(limits=c(-9,9))+ 
+  scale_alpha_manual(values=c(1,0.1,1),guide="none")+
+    scale_fill_manual(values=anno_colors$`KEGG Pathway`,na.value="grey",guide="none")+
+  ggtitle("Top KEGG Pathways")
+
+(a|b) /
+(c|d) 
+
+
+##CHANGE SIZE SUPP VOLCANOES HERE
+ggsave("./Graphs/Supp_volcanoes.pdf",height=8,width=8.5,units="in")
+
+e
+##CHANGE SIZE MAIN VOLCANO HERE
+ggsave("./Graphs/Colored_kegg_volcano.pdf",height=6,width=6.5,units="in")
+
+saveRDS(e,"Dataframes/colored volcano.rds")
+```
+Heatmap with genes in highlighted kegg pathways
+```{r}
+hm<-alldata[c(1,20:55)]%>%
+  column_to_rownames("Probe Name")
+
+dehmsamp<-samplekey%>%filter(sampletype=="cecum" & treatment!="conv")%>%mutate(treatment=factor(treatment,levels=c("cef","cdi")))
+
+genelist<-filter(DE_cec,!is.na(e) & direction!="Not DE")$X
+
+hmconv<-hm[match(genelist,rownames(hm)),(samplekey%>%filter(sampletype=="cecum" & treatment=="conv"))$filename]%>%as.matrix%>%log2()
+
+conv<-rowMeans(hmconv)
+
+hmsig<-hm[match(genelist,rownames(hm)),(samplekey%>%filter(sampletype=="cecum" & treatment!="conv"))$filename]%>%as.matrix%>%log2()
+
+hmsig_rc<-(hmsig-rowMeans(hmsig))/apply(hmsig,1,sd)
+
+hmgeneanno<-DE_cec%>%
+          filter(X %in% genelist)%>%
+          select(X,a,b,d,c,Log2.fold.change)%>%
+          mutate(X=factor(X, levels=rownames(hmsig)))%>%
+          arrange(X)%>%
+          mutate(order=factor(paste0(substring(a, 1, 1),substring(b, 1, 1),substring(d, 1, 1),substring(c, 1, 1)),levels=c("INANANA","NAGNANA","NAGPNA","NANAPNA","NANAPC","NANANAC")))%>%
+  arrange(order,Log2.fold.change)%>%
+  mutate(c=case_when(!is.na(a)~a,
+                     !is.na(b)~b,
+                     .default=c))%>%
+  select(X,d,c)%>%
+  column_to_rownames("X")%>%
+  as.matrix()
+
+set.seed(041922)
+##CHANGE SIZE HEATMAP HERE
+pdf(file="Graphs/Heatmap_allDE_standardized.pdf",width=6.5,height=6)
+draw(Heatmap(hmsig_rc[rownames(hmgeneanno),],
+        name="Standardized \nNormalized \nGene Count",
+        column_labels = rep("",8),
+        clustering_distance_rows="maximum",
+        cluster_rows=F,
+        cluster_columns=F,
+        border=T,
+        row_names_gp = gpar(fontsize=12,fontface = "italic"),
+        left_annotation=rowAnnotation(`KEGG Pathway`=hmgeneanno,
+                                      width=unit(0.5,"cm"),
+                                      show_annotation_name=F,
+                                      na_col="white",
+         col=list(`KEGG Pathway`=anno_colors$`KEGG Pathway`)),
+        bottom_annotation=HeatmapAnnotation(Treatment=dehmsamp$treatment, show_annotation_name=F,col=list(Treatment=anno_colors$Treatment))),
+     merge_legend=T)
+dev.off()
+
+```
+
+#GSE plot
+```{r}
+gse_kegg_plot<-gse_kegg_cec@result%>%
+            group_by(core_enrichment,NES,p.adjust,enrichmentScore,setSize)%>%
+            summarize_all(toString)%>%
+            ungroup()%>%
+            mutate(direction=ifelse(NES>0,"Up in CDI","Down in CDI"))%>%
+            group_by(direction)%>%
+            arrange(-abs(NES))%>%
+            mutate(count=1:n())%>%
+            arrange(NES)%>%
+            mutate(plotname=fct_inorder(str_wrap(Description,60)))
+
+ggplot(gse_kegg_plot,aes(x=NES,y=plotname,color=p.adjust,size=setSize))+
+  geom_point()+
+  theme_bw()+
+  scale_color_gradient(low="black",high="grey")+
+  labs(y="",x="Normalized Enrichment Score",size="# of Genes in Set","Adjusted p-value")+
+  scale_x_continuous(limits=c(-3,3),breaks=seq(-3,3,1))
+
+##CHANGE SIZE GSE HERE
+ggsave("Graphs/KEGG_GSE_cefvcdi_cecum.pdf",height=5,width=6)
+```
+
+#conv v cef volcano
+```{r}
+DE_cec_conv<-DEall%>%
+  filter(sampletype=="cecum",comparison=="conv_v_cef")%>%
+  mutate(plot.p=-log10(BH.p.value))%>%
+  mutate(direction=case_when(Log2.fold.change>0.5 & BH.p.value<=0.05~"Up",
+                             Log2.fold.change < -0.5 & BH.p.value<=0.05~"Down",
+                             .default="Not DE"))%>%
+  left_join(.,probeinfo,by=c("X"="Probe Name"))%>%
+  mutate(a=ifelse(entrezgene_id %in% kegg$mmu04657,"IL-17 signaling",NA))%>%
+  mutate(b=ifelse(entrezgene_id %in% kegg$mmu00010,"Glycolysis / Gluconeogenesis",NA))%>%
+  mutate(c=ifelse(entrezgene_id %in% kegg$mmu04979,"Cholesterol metabolism",NA))%>%
+  mutate(d=ifelse(entrezgene_id %in% kegg$mmu03320,"PPAR signaling pathway",NA))%>%
+  mutate(e=ifelse(entrezgene_id %in% unlist(kegg),"+",NA))%>%
+  mutate(f=ifelse(X %in% cclist,"Cell Culture Gene",NA))%>%
+  select(X,Log2.fold.change,plot.p,direction,a,b,c,d)%>%
+  pivot_longer(cols=c(a,b,c,d))%>%
+  select(-name)%>%
+  unique()%>%
+  mutate(value=factor(value, levels=c("IL-17 signaling","Glycolysis / Gluconeogenesis","Cholesterol metabolism","PPAR signaling pathway")))%>%
+  arrange(value)%>%
+  mutate(label=ifelse(direction!="Not DE",X,""))
+
+ngenes_conv<-DE_cec_conv%>%
+  select(X,direction)%>%
+  group_by(direction)%>%
+  summarize(count=n())
+
+ggplot()+ 
+  geom_hline(yintercept=-log10(0.05),linetype="dashed",color="grey50")+
+  geom_vline(xintercept=.5, linetype="dashed",color="grey50")+ 
+  geom_vline(xintercept=-0.5, linetype="dashed",color="grey50")+
+  geom_point(data=DE_cec_conv%>%filter(is.na(value)),aes(x=Log2.fold.change,y=plot.p,alpha=direction,fill=value),shape=21,size=3)+
+  geom_point(data=DE_cec_conv%>%filter(!is.na(value) & direction!= "Not DE"),aes(x=Log2.fold.change,y=plot.p,fill=value,alpha=direction),shape=21,size=3)+ 
+  geom_text_repel(data=DE_cec_conv%>%filter(!is.na(value) & direction!= "Not DE")%>%select(Log2.fold.change,plot.p,label)%>%unique(),aes(x=Log2.fold.change, y=plot.p, label=label),max.overlaps=20,min.segment.length=0.2,force=10)+ 
+
+  geom_text(data=filter(ngenes_conv,direction=="Up"),aes(label=count,x=Inf),x=8.5,y=3.8,color="grey50")+
+  geom_text(data=filter(ngenes_conv,direction=="Down"),aes(label=count,x=-Inf),x=-8.5,y=3.8,color="grey50")+
+  theme_bw()+ 
+  theme(panel.grid=element_blank(),
+        legend.position="bottom")+ 
+  labs(x="Log2Fold change",y="-log10padj",fill="Gene Set")+ 
+  scale_y_continuous(limits=c(0,4), breaks=seq(0,4,1), expand=c(0,0))+ 
+  scale_x_continuous(limits=c(-9,9))+ 
+  scale_alpha_manual(values=c(1,0.1,1),guide="none")+
+    scale_fill_manual(values=anno_colors$`KEGG Pathway`,na.value="grey",guide="none")+
+  ggtitle("Top KEGG Pathways")
+
+##CHANGE SIZE CONVENTIONAL V CEFOPERAZONE VOLCANO HERE
+ggsave("./Graphs/Colored_kegg_volcano_conv.pdf",height=6,width=6.5,units="in")
+
+```
+
+#Export
+```{r}
+cefcdiexport<-DE_cec_all%>%
+            select(-label)%>%
+            group_by(X,Log2.fold.change,plot.p,direction)%>%
+            summarize_all(~paste(unique(na.omit(.)), collapse = ', '))%>%
+            mutate(direction=case_when(direction=="Up"~"Up in CDI",
+                                       direction=="Down"~"Down in CDI",
+                                       .default=direction))%>%
+            rename("Probe Name"=X,"KEGG"=value)
+
+convcefexport<-DE_cec_conv%>%
+            select(-label)%>%
+            group_by(X,Log2.fold.change,plot.p,direction)%>%
+            summarize_all(~paste(unique(na.omit(.)), collapse = ', '))%>%
+            mutate(direction=case_when(direction=="Up"~"Up in Cefoperazone",
+                                       direction=="Down"~"Down in Cefoperazone",
+                                       .default=direction))%>%
+            rename("Probe Name"=X,"KEGG"=value)
+
+normcount<-alldata_long%>%
+  filter(sampletype=="cecum")%>%
+  mutate(label=paste(treatment,mouse))%>%
+  select(`Probe Name`,normcount,label)%>%
+  pivot_wider(id_cols=`Probe Name`,names_from = label, values_from = normcount)
+
+GSEexport<-gse_kegg_plot%>%
+  select(-plotname)
+
+
+write_xlsx(list("cef_v_cdi DE"=cefcdiexport,
+                "conv_v_cef DE"=convcefexport,
+                "Normalized Counts"=normcount,
+                "GSE"=GSEexport,
+                "Probe Information"=probeinfo[1:10]),
+           "Export/Raw Data File.xlsx")
+```
